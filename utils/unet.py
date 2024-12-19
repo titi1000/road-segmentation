@@ -7,16 +7,17 @@ class Block(nn.Module):
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
         self.relu = nn.ReLU(inplace=True)
-        self.bn = nn.BatchNorm2d(out_channels)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.bn2 = nn.BatchNorm2d(out_channels)
         self.dropout = nn.Dropout2d(dropout_prob)
 
     def forward(self, x):
         x = self.conv1(x)
-        #x = self.bn(x)
+        x = self.bn1(x)
         x = self.relu(x)
-        #x = self.dropout(x)
+        x = self.dropout(x)
         x = self.conv2(x)
-        #x = self.bn(x)
+        x = self.bn2(x)
         return self.relu(x)
 
 class Encoder(nn.Module):

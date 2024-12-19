@@ -11,29 +11,32 @@ import albumentations as A
 
 from skimage.transform import resize
 
-from utils.utils import plot_loss, DiceLoss
+from utils.utils import *
 from utils.resnet_unet import ResNetUnet
 
 import matplotlib.image as mpimg
 import torchvision.transforms as T
 
-BATCH_SIZE = 8
-EPOCHS = 10
+# Hyperparameters
+BATCH_SIZE = 2
+EPOCHS = 50
 LEARNING_RATE = 1e-4
 N_CLASSES = 1
 N_CHANNELS = 3
 BEST_CHECKPOINTS_PATH = "checkpoints1/best_checkpoints.pt"
 
+# Data path
 image_dir = "training/images"
 mask_dir = "training/groundtruth"
 image_dir_test = "test_set_images"
 
-# Define augmentations
+# Augmentations
 augmentations = A.Compose([
-    A.HorizontalFlip(p=0.5),
-    A.RandomRotate90(p=0.5),
-    A.RandomResizedCrop(size=(256,256), scale=(0.25,0.5), ratio=(0.75, 1.3333333333333333), interpolation=1, mask_interpolation=0, p=0.5, always_apply=None),
-    A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5)
+    A.RandomBrightnessContrast(p=0.5),  # Adjust brightness/contrast
+    RandomShadow(shadow_color=(0, 0, 0), intensity=0.6, always_apply=False, p=0.7),  # Apply random shadows
+    A.HorizontalFlip(p=0.5),  # Flip for diversity
+    A.RandomRotate90(p=0.5),  # Random rotation
+    A.RandomResizedCrop(size=(384,384), scale=(0.25,0.5), ratio=(0.75, 1.3333333333333333), interpolation=1, mask_interpolation=0, p=0.5)
 ])
 
 # Augment and save images
@@ -46,7 +49,7 @@ for i, (image_file, mask_file) in enumerate(zip(image_filenames, mask_filenames)
     mask = np.array(Image.open(os.path.join(mask_dir, mask_file)))
 
     # Apply augmentations
-    for j in range(35):
+    for j in range(4):
         augmented = augmentations(image=image, mask=mask)
         augmented_image = augmented['image']
         augmented_mask = augmented['mask']
@@ -60,10 +63,11 @@ print("Augmented data saved!")
 # Create datasets with consistent transformations
 transform_training = SegmentationTransform()
 transform_test = T.Compose([
-    T.Resize((256, 256)),
+    T.Resize((384, 384)),
     T.ToTensor()
 ])
 
+# Create datasets
 dataset = RouteSegmentationDataset(image_dir, mask_dir, transform=transform_training)
 test_dataset = TestDataset(image_dir_test, transform=transform_test)
 
@@ -75,15 +79,17 @@ train_dataset, validation_dataset = random_split(dataset, [train_size, validatio
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 validation_loader = DataLoader(validation_dataset, batch_size=BATCH_SIZE, shuffle=True)
 
+# Get device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
+# Instanciate mode
 model = ResNetUnet(N_CHANNELS, N_CLASSES).to(device)
 
 ### TRAINING
 
-loss_fn = DiceLoss()
-optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
+loss_fn = torch.nn.BCELoss()
+optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-6)
 
 # Training loop 
@@ -139,7 +145,7 @@ for epoch in range(EPOCHS):
 
 ### TEST
 
-# load test set images for later use
+# Load test set images for later use
 test_images = []
 for i in range(50):
     mask_path = os.path.join(image_dir_test, sorted(os.listdir(image_dir_test), key=lambda x: int(x.split('_')[1].split('.')[0]))[i])
@@ -169,7 +175,7 @@ final_all_predictions = []
 for i in range(50):
     final_all_predictions.append(resize(all_predictions[i][0], test_images[i].shape, order=0))
 
-# create predictions on test set
+# Create predictions on test set
 os.makedirs("test_set_preds", exist_ok=True)
 
 for i in range(len(all_predictions)):
@@ -177,9 +183,11 @@ for i in range(len(all_predictions)):
     mask_uint8 = (mask * 255).astype(np.uint8)
     Image.fromarray(mask_uint8).save(f"test_set_preds/pred_{i + 1}.png")
 
+### WRITE PREDS CSV
+
 foreground_threshold = 0.25 # percentage of pixels > 1 required to assign a foreground label to a patch
 
-# assign a label to a patch
+# Assign a label to a patch
 def patch_to_label(patch):
     df = np.mean(patch)
     if df > foreground_threshold:

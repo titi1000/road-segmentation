@@ -4,24 +4,29 @@ import torchvision.models as models
 import torch.nn.functional as F
 
 class DecoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, dropout_p=0.4):
         super().__init__()
         self.upconv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
         self.conv1 = nn.Conv2d(out_channels * 2, out_channels, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(out_channels)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU(inplace=True)
+        self.dropout = nn.Dropout2d(p=dropout_p)
 
     def forward(self, x, skip):
         x = self.upconv(x)
         if x.size() != skip.size():
             x = F.interpolate(x, size=skip.size()[2:], mode="bilinear", align_corners=False)
         x = torch.cat([x, skip], dim=1)
-        x = self.relu(self.conv1(x))
-        x = self.relu(self.conv2(x))
+        x = self.relu(self.bn1(self.conv1(x)))
+        x = self.dropout(x)
+        x = self.relu(self.bn2(self.conv2(x)))
+        x = self.dropout(x)
         return x
 
 class ResNetUnet(nn.Module):
-    def __init__(self, n_channels=3, n_classes=1):
+    def __init__(self, n_channels=3, n_classes=1, dropout_p=0.4):
         super().__init__()
         base_model = models.resnet34(pretrained=True)
 
@@ -35,12 +40,13 @@ class ResNetUnet(nn.Module):
         self.enc3 = base_model.layer3
         self.enc4 = base_model.layer4
 
-        self.dec4 = DecoderBlock(512, 256)
-        self.dec3 = DecoderBlock(256, 128)
-        self.dec2 = DecoderBlock(128, 64)
-        self.dec1 = DecoderBlock(64, 64)
-        
+        self.dec4 = DecoderBlock(512, 256, dropout_p)
+        self.dec3 = DecoderBlock(256, 128, dropout_p)
+        self.dec2 = DecoderBlock(128, 64, dropout_p)
+        self.dec1 = DecoderBlock(64, 64, dropout_p)
+
         self.final_conv = nn.Conv2d(64, n_classes, kernel_size=1)
+        self.final_dropout = nn.Dropout2d(p=dropout_p)
 
     def forward(self, x):
         x0 = self.initial(x)
@@ -48,11 +54,12 @@ class ResNetUnet(nn.Module):
         x2 = self.enc2(x1)
         x3 = self.enc3(x2)
         x4 = self.enc4(x3)
-        
+
         d4 = self.dec4(x4, x3)
         d3 = self.dec3(d4, x2)
         d2 = self.dec2(d3, x1)
         d1 = self.dec1(d2, x0)
 
+        d1 = self.final_dropout(d1) 
         out = self.final_conv(d1)
         return torch.sigmoid(out)

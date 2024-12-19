@@ -30,9 +30,7 @@ class RouteSegmentationDataset(Dataset):
 
 class SegmentationTransform:
     def __init__(self):
-        self.resize = T.Resize((256, 256))
-        self.rotation = T.RandomRotation(90)
-        self.hflip = T.RandomHorizontalFlip(0.5)
+        self.resize = T.Resize((384, 384))
     
     def __call__(self, image, mask):
         image = self.resize(image)
